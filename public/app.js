@@ -380,7 +380,13 @@ function buildScoreboard(players, teams, turnOrder, currentName) {
                 </div>
                 ${history.length > 0 ? `
                   <div class="history-chips">
-                    ${history.map(s => `<span class="hchip${s === 0 ? ' miss' : s >= 8 ? ' high' : ''}">${s === 0 ? '✗' : s}</span>`).join('')}
+                    ${history.map(s => {
+                      const bust = s < 0;
+                      const miss = s === 0;
+                      const cls  = (miss || bust) ? ' miss' : s >= 8 ? ' high' : '';
+                      const lbl  = miss ? '✗' : Math.abs(s);
+                      return `<span class="hchip${cls}">${lbl}</span>`;
+                    }).join('')}
                   </div>` : ''}
               </div>
             </div>`;
@@ -437,18 +443,13 @@ function validateScore() {
   const activeTurn = getActiveTurn(players, teams, turnOrder, currentTurn);
   if (!activeTurn) return;
 
-  // Update player history
-  const newPlayers = players.map(p =>
-    p.name === activeTurn.name
-      ? { ...p, history: [...(p.history || []), pendingScore] }
-      : { ...p }
-  );
-
-  // Update team score / misses
+  // Update team score / misses first, so we know if there's a bust
   const newTeams = { team1: { ...teams.team1 }, team2: { ...teams.team2 } };
   const currentTeamId = activeTurn.player.team;
   const team     = newTeams[currentTeamId];
   const teamName = currentTeamId === 'team1' ? 'Équipe 1' : 'Équipe 2';
+
+  let historyEntry = pendingScore; // may be overridden to negative on bust
 
   if (pendingScore === 0) {
     team.misses += 1;
@@ -457,10 +458,18 @@ function validateScore() {
     team.misses  = 0;
     team.score  += pendingScore;
     if (team.score > 50) {
-      team.score = 25;
+      team.score   = 25;
+      historyEntry = -pendingScore; // negative flags a bust in history
       showToast(`${teamName} dépasse 50 → retour à 25 !`);
     }
   }
+
+  // Record history entry (negative value = the score caused a bust)
+  const newPlayers = players.map(p =>
+    p.name === activeTurn.name
+      ? { ...p, history: [...(p.history || []), historyEntry] }
+      : { ...p }
+  );
 
   let winner = null;
   if (team.score === 50) {
