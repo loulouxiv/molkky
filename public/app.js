@@ -131,7 +131,7 @@ function removePlayer(i) {
 function createGame() {
   if (localPlayers.length < 2) return;
   showLoading('Création de la partie...');
-  socket.emit('create-game', { players: localPlayers });
+  socket.emit('create-game', { players: localPlayers, baseUrl: window.location.origin });
 }
 
 // =====================================================================

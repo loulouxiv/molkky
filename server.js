@@ -57,10 +57,11 @@ function buildTurnOrder(team1, team2) {
 app.use(express.static(path.join(__dirname, 'public')));
 
 io.on('connection', (socket) => {
-  socket.on('create-game', async ({ players }) => {
+  socket.on('create-game', async ({ players, baseUrl }) => {
     const gameId = Math.random().toString(36).substring(2, 10).toUpperCase();
-    const host = process.env.PUBLIC_HOST || getLocalIP();
-    const gameUrl = `http://${host}:${PORT}/?id=${gameId}`;
+    // baseUrl is sent by the browser so it always reflects the actual public URL
+    const origin = baseUrl || `http://${getLocalIP()}:${PORT}`;
+    const gameUrl = `${origin}/?id=${gameId}`;
 
     let qrCode = '';
     try {
