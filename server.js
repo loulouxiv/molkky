@@ -74,16 +74,16 @@ io.on('connection', (socket) => {
       console.error('QR generation error:', e.message);
     }
 
-    const playerObjects = players.map(name => ({
-      name,
-      team: null,
-      score: 0,
-      misses: 0,
-    }));
+    const playerObjects = players.map(name => ({ name, team: null }));
 
-    const teams = drawTeams(playerObjects);
-    const allPlayers = [...teams.team1, ...teams.team2];
-    const turnOrder = buildTurnOrder(teams.team1, teams.team2);
+    const { team1, team2 } = drawTeams(playerObjects);
+    const allPlayers = [...team1, ...team2];
+    const turnOrder  = buildTurnOrder(team1, team2);
+    // scores and misses are tracked per team, not per player
+    const teams = {
+      team1: { score: 0, misses: 0 },
+      team2: { score: 0, misses: 0 },
+    };
 
     const game = {
       id: gameId,
@@ -124,16 +124,15 @@ io.on('connection', (socket) => {
     const game = games.get(gameId);
     if (!game) return;
 
-    const freshPlayers = game.players.map(p => ({
-      name: p.name,
-      team: null,
-      score: 0,
-      misses: 0,
-    }));
+    const freshPlayers = game.players.map(p => ({ name: p.name, team: null }));
 
-    const teams = drawTeams(freshPlayers);
-    const allPlayers = [...teams.team1, ...teams.team2];
-    const turnOrder = buildTurnOrder(teams.team1, teams.team2);
+    const { team1, team2 } = drawTeams(freshPlayers);
+    const allPlayers = [...team1, ...team2];
+    const turnOrder  = buildTurnOrder(team1, team2);
+    const teams = {
+      team1: { score: 0, misses: 0 },
+      team2: { score: 0, misses: 0 },
+    };
 
     const newGame = {
       ...game,

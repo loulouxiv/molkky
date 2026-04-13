@@ -4,8 +4,8 @@
 
 const socket = io();
 
-let gameState   = null;
-let gameId      = null;
+let gameState    = null;
+let gameId       = null;
 let pendingScore = null;
 let localPlayers = [];
 
@@ -26,10 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 socket.on('connect', () => {
-  // Re-join after reconnect if we were already in a game
-  if (joinId && !gameState) {
-    socket.emit('join-game', joinId);
-  }
+  if (joinId && !gameState) socket.emit('join-game', joinId);
 });
 
 socket.on('game-state', (state) => {
@@ -39,9 +36,7 @@ socket.on('game-state', (state) => {
   routePhase();
 });
 
-socket.on('game-error', (msg) => {
-  renderError(msg);
-});
+socket.on('game-error', (msg) => renderError(msg));
 
 // =====================================================================
 // ROUTING
@@ -74,7 +69,6 @@ function renderSetup() {
         </div>
         <div id="playerList">${buildPlayerList()}</div>
       </div>
-
       <button id="startBtn" class="btn btn-primary btn-block"
               onclick="createGame()"
               ${localPlayers.length < 2 ? 'disabled' : ''}>
@@ -114,7 +108,6 @@ function addPlayer() {
   }
   localPlayers.push(name);
   input.value = '';
-
   document.getElementById('playerList').innerHTML = buildPlayerList();
   const btn = document.getElementById('startBtn');
   if (btn) btn.disabled = localPlayers.length < 2;
@@ -139,8 +132,9 @@ function createGame() {
 // =====================================================================
 
 function renderTeams() {
-  const { teams, turnOrder, id } = gameState;
-  const allPlayers = [...teams.team1, ...teams.team2];
+  const { players, turnOrder, id } = gameState;
+  const team1Players = players.filter(p => p.team === 'team1');
+  const team2Players = players.filter(p => p.team === 'team2');
 
   setApp(`
     <header class="header">
@@ -151,7 +145,7 @@ function renderTeams() {
       <div class="teams-grid">
         <div class="team-card team1">
           <div class="team-label t1">Équipe 1</div>
-          ${teams.team1.map(p => `
+          ${team1Players.map(p => `
             <div class="mini-player">
               <div class="avatar sm" style="background:var(--t1)">${esc(p.name[0].toUpperCase())}</div>
               <span>${esc(p.name)}</span>
@@ -159,7 +153,7 @@ function renderTeams() {
         </div>
         <div class="team-card team2">
           <div class="team-label t2">Équipe 2</div>
-          ${teams.team2.map(p => `
+          ${team2Players.map(p => `
             <div class="mini-player">
               <div class="avatar sm" style="background:var(--t2)">${esc(p.name[0].toUpperCase())}</div>
               <span>${esc(p.name)}</span>
@@ -171,7 +165,7 @@ function renderTeams() {
         <div class="section-title">Ordre de passage</div>
         <div class="turn-list">
           ${turnOrder.map((name, i) => {
-            const player = allPlayers.find(p => p.name === name);
+            const player = players.find(p => p.name === name);
             return `
               <div class="turn-item">
                 <div class="turn-num">${i + 1}</div>
@@ -207,10 +201,8 @@ function startGame() {
 
 function renderGame() {
   const { players, turnOrder, currentTurn, qrCode, url, winner, teams, absoluteTurn } = gameState;
-  const allPlayers = [...teams.team1, ...teams.team2];
 
-  // Determine active player (skip eliminated)
-  const activeTurn = getActiveTurn(players, turnOrder, currentTurn);
+  const activeTurn    = getActiveTurn(players, teams, turnOrder, currentTurn);
   const currentName   = activeTurn ? activeTurn.name : null;
   const currentPlayer = activeTurn ? activeTurn.player : null;
 
@@ -255,63 +247,60 @@ function renderGame() {
 
       <!-- Scoreboard -->
       <div class="card">
-        <div class="section-title">Classement · Tour ${absoluteTurn + 1}</div>
-        ${buildScoreboard(players, currentName)}
+        <div class="section-title">Scores des équipes · Tour ${absoluteTurn + 1}</div>
+        ${buildScoreboard(players, teams, currentName)}
       </div>
     </main>
   `);
 }
 
-function buildScoreboard(players, currentName) {
-  const sorted = [...players].sort((a, b) => {
-    if (a.misses >= 3 && b.misses < 3) return 1;
-    if (b.misses >= 3 && a.misses < 3) return -1;
-    return b.score - a.score;
-  });
-
-  return sorted.map(p => {
-    const elim    = p.misses >= 3;
-    const isCur   = p.name === currentName;
-    const pct     = Math.min((p.score / 50) * 100, 100);
-    const barClr  = p.score >= 45 ? 'var(--success)' : p.score >= 30 ? 'var(--accent)' : 'var(--primary-light)';
+function buildScoreboard(players, teams, currentName) {
+  return ['team1', 'team2'].map(teamId => {
+    const team        = teams[teamId];
+    const teamPlayers = players.filter(p => p.team === teamId);
+    const elim        = team.misses >= 3;
+    const pct         = Math.min((team.score / 50) * 100, 100);
+    const barClr      = team.score >= 45 ? 'var(--success)' : team.score >= 30 ? 'var(--accent)' : 'var(--primary-light)';
+    const teamColor   = teamId === 'team1' ? 'var(--t1)' : 'var(--t2)';
+    const teamName    = teamId === 'team1' ? 'Équipe 1' : 'Équipe 2';
 
     return `
-      <div class="score-row ${isCur ? 'active' : ''} ${elim ? 'elim' : ''}">
-        <div class="avatar" style="background:${p.team === 'team1' ? 'var(--t1)' : 'var(--t2)'}">
-          ${esc(p.name[0].toUpperCase())}
+      <div class="team-score-card ${elim ? 'elim' : ''}">
+        <div class="team-score-header">
+          <div>
+            <div class="team-score-label" style="color:${teamColor}">${teamName}</div>
+            <div class="miss-row">
+              ${[0,1,2].map(i => `<div class="miss-dot${team.misses > i ? ' hit' : ''}"></div>`).join('')}
+              ${elim ? '<span class="elim-tag">éliminée</span>' : ''}
+            </div>
+          </div>
+          <div class="team-score-num${team.score >= 45 ? ' near-win' : ''}">${team.score}<span class="score-max">/50</span></div>
         </div>
-        <div class="score-info">
-          <div class="score-name">
-            ${esc(p.name)}
-            ${elim ? '<span class="elim-tag">éliminé</span>' : ''}
-          </div>
-          <div class="miss-row">
-            <div class="miss-dot${p.misses >= 1 ? ' hit' : ''}"></div>
-            <div class="miss-dot${p.misses >= 2 ? ' hit' : ''}"></div>
-            <div class="miss-dot${p.misses >= 3 ? ' hit' : ''}"></div>
-          </div>
-          <div class="progress">
-            <div class="progress-bar" style="width:${pct}%;background:${barClr}"></div>
-          </div>
+        <div class="progress" style="margin:6px 0 10px">
+          <div class="progress-bar" style="width:${pct}%;background:${barClr}"></div>
         </div>
-        <div class="score-num${p.score >= 45 ? ' near-win' : ''}">${p.score}</div>
+        ${teamPlayers.map(p => `
+          <div class="team-player-row${p.name === currentName ? ' active-player' : ''}">
+            <div class="avatar sm" style="background:${teamColor}">${esc(p.name[0].toUpperCase())}</div>
+            <span class="fw500">${esc(p.name)}</span>
+            ${p.name === currentName ? '<span class="now-tag">← maintenant</span>' : ''}
+          </div>
+        `).join('')}
       </div>`;
   }).join('');
 }
 
 function winnerOverlay(winner) {
-  const isTeam = winner.name.startsWith('Équipe');
   return `
     <div class="overlay" onclick="this.remove()">
       <div class="winner-card" onclick="event.stopPropagation()">
         <div class="trophy">🏆</div>
-        <h2>${isTeam ? esc(winner.name) + ' gagne !' : 'Victoire !'}</h2>
-        ${!isTeam ? `<div class="winner-name">${esc(winner.name)}</div>` : ''}
-        <p class="winner-sub">
-          ${isTeam
-            ? "Toute l'équipe adverse est éliminée !"
-            : `${esc(winner.name)} atteint exactement 50 points !`}
-        </p>
+        <h2>${esc(winner.name)} gagne !</h2>
+        <p class="winner-sub">${
+          winner.reason === 'score'
+            ? `L'équipe atteint exactement 50 points !`
+            : `L'équipe adverse est éliminée après 3 ratés consécutifs !`
+        }</p>
         <button class="btn btn-primary btn-block" onclick="window.location.href='/'">
           Nouvelle partie
         </button>
@@ -345,58 +334,54 @@ function selectScore(score) {
 function validateScore() {
   if (pendingScore === null || !gameState) return;
 
-  const { players, turnOrder, currentTurn, absoluteTurn } = gameState;
-  const activeTurn = getActiveTurn(players, turnOrder, currentTurn);
+  const { players, turnOrder, currentTurn, absoluteTurn, teams } = gameState;
+  const activeTurn = getActiveTurn(players, teams, turnOrder, currentTurn);
   if (!activeTurn) return;
 
-  const newPlayers = players.map(p => ({ ...p }));
-  const player     = newPlayers.find(p => p.name === activeTurn.name);
-  if (!player) return;
+  const newTeams = {
+    team1: { ...teams.team1 },
+    team2: { ...teams.team2 },
+  };
+  const currentTeamId = activeTurn.player.team;
+  const team     = newTeams[currentTeamId];
+  const teamName = currentTeamId === 'team1' ? 'Équipe 1' : 'Équipe 2';
 
   if (pendingScore === 0) {
-    player.misses += 1;
-    if (player.misses >= 3) {
-      showToast(`${player.name} est éliminé après 3 ratés !`);
+    team.misses += 1;
+    if (team.misses >= 3) {
+      showToast(`${teamName} éliminée après 3 ratés !`);
     }
   } else {
-    player.misses  = 0;
-    player.score  += pendingScore;
-    if (player.score > 50) {
-      player.score = 25;
-      showToast(`${player.name} dépasse 50 → retour à 25 !`);
+    team.misses  = 0;
+    team.score  += pendingScore;
+    if (team.score > 50) {
+      team.score = 25;
+      showToast(`${teamName} dépasse 50 → retour à 25 !`);
     }
   }
 
   // Check for winner
   let winner = null;
-  if (player.score === 50) {
-    winner = { name: player.name, team: player.team };
+  if (team.score === 50) {
+    winner = { name: teamName, team: currentTeamId, reason: 'score' };
+  } else if (newTeams.team1.misses >= 3) {
+    winner = { name: 'Équipe 2', team: 'team2', reason: 'elim' };
+  } else if (newTeams.team2.misses >= 3) {
+    winner = { name: 'Équipe 1', team: 'team1', reason: 'elim' };
   }
 
-  if (!winner) {
-    const t1Alive = newPlayers.filter(p => p.team === 'team1' && p.misses < 3);
-    const t2Alive = newPlayers.filter(p => p.team === 'team2' && p.misses < 3);
-    if      (t1Alive.length === 0) winner = { name: 'Équipe 2', team: 'team2' };
-    else if (t2Alive.length === 0) winner = { name: 'Équipe 1', team: 'team1' };
-  }
-
-  // Advance to next non-eliminated player
+  // Advance to next player whose team is not eliminated
   let nextTurn = activeTurn.turn + 1;
   for (let i = 0; i < turnOrder.length; i++) {
-    const p = newPlayers.find(pl => pl.name === turnOrder[nextTurn % turnOrder.length]);
-    if (p && p.misses < 3) break;
+    const p = players.find(pl => pl.name === turnOrder[nextTurn % turnOrder.length]);
+    if (p && newTeams[p.team].misses < 3) break;
     nextTurn++;
   }
 
-  const newState = {
-    ...gameState,
-    players:       newPlayers,
-    currentTurn:   nextTurn,
-    absoluteTurn:  (absoluteTurn || 0) + 1,
-    winner,
-  };
-
-  socket.emit('update-game', { gameId, state: newState });
+  socket.emit('update-game', {
+    gameId,
+    state: { ...gameState, teams: newTeams, currentTurn: nextTurn, absoluteTurn: (absoluteTurn || 0) + 1, winner },
+  });
 }
 
 function toggleQR() {
@@ -408,15 +393,15 @@ function toggleQR() {
 // =====================================================================
 
 /**
- * Find the current active (non-eliminated) player in turn order.
- * Returns { turn, name, player } or null if all eliminated.
+ * Returns the current active player (whose team is not eliminated).
+ * { turn, name, player } or null if all teams eliminated.
  */
-function getActiveTurn(players, turnOrder, currentTurn) {
+function getActiveTurn(players, teams, turnOrder, currentTurn) {
   for (let i = 0; i < turnOrder.length * 2; i++) {
     const idx  = (currentTurn + i) % turnOrder.length;
     const name = turnOrder[idx];
     const p    = players.find(pl => pl.name === name);
-    if (p && p.misses < 3) {
+    if (p && teams[p.team] && teams[p.team].misses < 3) {
       return { turn: currentTurn + i, name, player: p };
     }
   }

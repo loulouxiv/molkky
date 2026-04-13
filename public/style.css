@@ -413,36 +413,57 @@ body {
   transform: scale(1.03);
 }
 
-/* ---- SCOREBOARD ---- */
-.score-row {
+/* ---- SCOREBOARD (team-based) ---- */
+.team-score-card {
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+  transition: opacity 0.2s;
+}
+.team-score-card.elim { opacity: 0.4; }
+
+.team-score-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border-radius: 10px;
-  margin-bottom: 7px;
-  background: var(--bg);
-  transition: background 0.2s, outline 0.2s;
+  justify-content: space-between;
+  margin-bottom: 4px;
 }
-.score-row.active {
-  background: #DCF0E5;
-  outline: 2px solid var(--primary-light);
-}
-.score-row.elim { opacity: 0.4; }
 
-.score-info { flex: 1; min-width: 0; }
-
-.score-name {
+.team-score-label {
   font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 3px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.team-score-num {
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text);
+}
+.team-score-num.near-win { color: var(--success); }
+.score-max {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.miss-row {
   display: flex;
   align-items: center;
   gap: 5px;
 }
+.miss-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.2s;
+}
+.miss-dot.hit { background: var(--danger); }
 
 .elim-tag {
   font-size: 10px;
@@ -453,40 +474,38 @@ body {
   border-radius: 4px;
 }
 
-.miss-row {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 3px;
-}
-.miss-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--border);
-  transition: background 0.2s;
-}
-.miss-dot.hit { background: var(--danger); }
-
 .progress {
-  height: 4px;
+  height: 5px;
   background: var(--border);
-  border-radius: 2px;
+  border-radius: 3px;
   overflow: hidden;
 }
 .progress-bar {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 3px;
   transition: width 0.4s ease;
 }
 
-.score-num {
-  font-size: 26px;
-  font-weight: 800;
-  min-width: 48px;
-  text-align: right;
-  line-height: 1;
+.team-player-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  font-size: 14px;
+  margin-top: 4px;
 }
-.score-num.near-win { color: var(--success); }
+.team-player-row.active-player {
+  background: rgba(0,0,0,0.05);
+}
+
+.now-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary-mid);
+  margin-left: auto;
+  white-space: nowrap;
+}
 
 /* ---- WINNER OVERLAY ---- */
 .overlay {
