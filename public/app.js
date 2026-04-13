@@ -4,10 +4,11 @@
 
 const socket = io();
 
-let gameState    = null;
-let gameId       = null;
-let pendingScore = null;
-let localPlayers = [];
+let gameState        = null;
+let gameId           = null;
+let pendingScore     = null;
+let localPlayers     = [];
+let manualAssignments = {}; // { playerName: 'team1' | 'team2' }
 
 const urlParams = new URLSearchParams(window.location.search);
 const joinId    = urlParams.get('id');
@@ -74,6 +75,11 @@ function renderSetup() {
               ${localPlayers.length < 2 ? 'disabled' : ''}>
         🎲 Tirer au sort les équipes
       </button>
+      <button id="manualBtn" class="btn btn-outline btn-block" style="margin-top:8px"
+              onclick="showManualTeams()"
+              ${localPlayers.length < 2 ? 'disabled' : ''}>
+        ✏️ Faire les équipes manuellement
+      </button>
     </main>
   `);
   setTimeout(() => document.getElementById('playerInput')?.focus(), 60);
@@ -109,22 +115,103 @@ function addPlayer() {
   localPlayers.push(name);
   input.value = '';
   document.getElementById('playerList').innerHTML = buildPlayerList();
-  const btn = document.getElementById('startBtn');
-  if (btn) btn.disabled = localPlayers.length < 2;
+  const canStart = localPlayers.length >= 2;
+  document.getElementById('startBtn').disabled  = !canStart;
+  document.getElementById('manualBtn').disabled = !canStart;
   input.focus();
 }
 
 function removePlayer(i) {
   localPlayers.splice(i, 1);
   document.getElementById('playerList').innerHTML = buildPlayerList();
-  const btn = document.getElementById('startBtn');
-  if (btn) btn.disabled = localPlayers.length < 2;
+  const canStart = localPlayers.length >= 2;
+  document.getElementById('startBtn').disabled  = !canStart;
+  document.getElementById('manualBtn').disabled = !canStart;
 }
 
 function createGame() {
   if (localPlayers.length < 2) return;
   showLoading('Création de la partie...');
   socket.emit('create-game', { players: localPlayers, baseUrl: window.location.origin });
+}
+
+// =====================================================================
+// MANUAL TEAM ASSIGNMENT SCREEN
+// =====================================================================
+
+function showManualTeams() {
+  manualAssignments = {};
+  renderManualTeams();
+}
+
+function renderManualTeams() {
+  const t1       = localPlayers.filter(n => manualAssignments[n] === 'team1');
+  const t2       = localPlayers.filter(n => manualAssignments[n] === 'team2');
+  const pending  = localPlayers.filter(n => !manualAssignments[n]);
+  const canConfirm = pending.length === 0 && t1.length >= 1 && t2.length >= 1;
+
+  setApp(`
+    <header class="header">
+      <h1>Mölkky</h1>
+      <div class="subtitle">Équipes manuelles</div>
+    </header>
+    <main class="screen">
+      <div class="card">
+        <div class="section-title">Répartition</div>
+        <div class="assign-summary">
+          <div class="assign-box t1">
+            <div class="assign-count">${t1.length}</div>
+            <div class="assign-label">Équipe 1</div>
+          </div>
+          <div class="assign-box grey">
+            <div class="assign-count">${pending.length}</div>
+            <div class="assign-label">Non assignés</div>
+          </div>
+          <div class="assign-box t2">
+            <div class="assign-count">${t2.length}</div>
+            <div class="assign-label">Équipe 2</div>
+          </div>
+        </div>
+
+        ${localPlayers.map((name, i) => {
+          const assigned = manualAssignments[name];
+          const avatarBg = assigned === 'team1' ? 'var(--t1)' : assigned === 'team2' ? 'var(--t2)' : '#9CA3AF';
+          return `
+            <div class="assign-row${!assigned ? ' unassigned' : ''}">
+              <div class="avatar" style="background:${avatarBg}">${esc(name[0].toUpperCase())}</div>
+              <span class="flex-1 fw500">${esc(name)}</span>
+              <button class="team-toggle t1${assigned === 'team1' ? ' active' : ''}"
+                      onclick="assignTeam(${i},'team1')">Éq. 1</button>
+              <button class="team-toggle t2${assigned === 'team2' ? ' active' : ''}"
+                      onclick="assignTeam(${i},'team2')">Éq. 2</button>
+            </div>`;
+        }).join('')}
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="renderSetup()">← Retour</button>
+        <button class="btn btn-primary flex-2"
+                onclick="confirmManualTeams()"
+                ${!canConfirm ? 'disabled' : ''}>
+          ✓ Confirmer les équipes
+        </button>
+      </div>
+    </main>
+  `);
+}
+
+function assignTeam(playerIndex, teamId) {
+  const name = localPlayers[playerIndex];
+  manualAssignments[name] = teamId;
+  renderManualTeams();
+}
+
+function confirmManualTeams() {
+  const t1Names = localPlayers.filter(n => manualAssignments[n] === 'team1');
+  const t2Names = localPlayers.filter(n => manualAssignments[n] === 'team2');
+  if (!t1Names.length || !t2Names.length) return;
+  showLoading('Création de la partie...');
+  socket.emit('set-teams', { team1Names: t1Names, team2Names: t2Names, baseUrl: window.location.origin });
 }
 
 // =====================================================================
@@ -220,7 +307,6 @@ function renderGame() {
     </div>
 
     <main class="screen">
-      <!-- Current turn -->
       <div class="card turn-card">
         <div class="turn-label">Au tour de</div>
         <div class="turn-name">${currentName ? esc(currentName) : '—'}</div>
@@ -245,27 +331,29 @@ function renderGame() {
         </button>
       </div>
 
-      <!-- Scoreboard -->
       <div class="card">
         <div class="section-title">Scores des équipes · Tour ${absoluteTurn + 1}</div>
-        ${buildScoreboard(players, teams, currentName)}
+        ${buildScoreboard(players, teams, turnOrder, currentName)}
       </div>
     </main>
   `);
 }
 
-function buildScoreboard(players, teams, currentName) {
+function buildScoreboard(players, teams, turnOrder, currentName) {
   return ['team1', 'team2'].map(teamId => {
-    const team        = teams[teamId];
-    const teamPlayers = players.filter(p => p.team === teamId);
-    const elim        = team.misses >= 3;
-    const pct         = Math.min((team.score / 50) * 100, 100);
-    const barClr      = team.score >= 45 ? 'var(--success)' : team.score >= 30 ? 'var(--accent)' : 'var(--primary-light)';
-    const teamColor   = teamId === 'team1' ? 'var(--t1)' : 'var(--t2)';
-    const teamName    = teamId === 'team1' ? 'Équipe 1' : 'Équipe 2';
+    const team      = teams[teamId];
+    // Players listed in turn order for this team
+    const teamPlayers = turnOrder
+      .map(name => players.find(p => p.name === name && p.team === teamId))
+      .filter(Boolean);
+    const elim      = team.misses >= 3;
+    const pct       = Math.min((team.score / 50) * 100, 100);
+    const barClr    = team.score >= 45 ? 'var(--success)' : team.score >= 30 ? 'var(--accent)' : 'var(--primary-light)';
+    const teamColor = teamId === 'team1' ? 'var(--t1)' : 'var(--t2)';
+    const teamName  = teamId === 'team1' ? 'Équipe 1' : 'Équipe 2';
 
     return `
-      <div class="team-score-card ${elim ? 'elim' : ''}">
+      <div class="team-score-card${elim ? ' elim' : ''}">
         <div class="team-score-header">
           <div>
             <div class="team-score-label" style="color:${teamColor}">${teamName}</div>
@@ -279,13 +367,24 @@ function buildScoreboard(players, teams, currentName) {
         <div class="progress" style="margin:6px 0 10px">
           <div class="progress-bar" style="width:${pct}%;background:${barClr}"></div>
         </div>
-        ${teamPlayers.map(p => `
-          <div class="team-player-row${p.name === currentName ? ' active-player' : ''}">
-            <div class="avatar sm" style="background:${teamColor}">${esc(p.name[0].toUpperCase())}</div>
-            <span class="fw500">${esc(p.name)}</span>
-            ${p.name === currentName ? '<span class="now-tag">← maintenant</span>' : ''}
-          </div>
-        `).join('')}
+        ${teamPlayers.map(p => {
+          const history = p.history || [];
+          const isCurrent = p.name === currentName;
+          return `
+            <div class="team-player-row${isCurrent ? ' active-player' : ''}">
+              <div class="avatar sm" style="background:${teamColor};flex-shrink:0">${esc(p.name[0].toUpperCase())}</div>
+              <div class="player-row-body">
+                <div class="player-row-top">
+                  <span class="fw500">${esc(p.name)}</span>
+                  ${isCurrent ? '<span class="now-tag">← maintenant</span>' : ''}
+                </div>
+                ${history.length > 0 ? `
+                  <div class="history-chips">
+                    ${history.map(s => `<span class="hchip${s === 0 ? ' miss' : s >= 8 ? ' high' : ''}">${s === 0 ? '✗' : s}</span>`).join('')}
+                  </div>` : ''}
+              </div>
+            </div>`;
+        }).join('')}
       </div>`;
   }).join('');
 }
@@ -298,8 +397,8 @@ function winnerOverlay(winner) {
         <h2>${esc(winner.name)} gagne !</h2>
         <p class="winner-sub">${
           winner.reason === 'score'
-            ? `L'équipe atteint exactement 50 points !`
-            : `L'équipe adverse est éliminée après 3 ratés consécutifs !`
+            ? "L'équipe atteint exactement 50 points !"
+            : "L'équipe adverse est éliminée après 3 ratés consécutifs !"
         }</p>
         <button class="btn btn-primary btn-block" onclick="window.location.href='/'">
           Nouvelle partie
@@ -338,19 +437,22 @@ function validateScore() {
   const activeTurn = getActiveTurn(players, teams, turnOrder, currentTurn);
   if (!activeTurn) return;
 
-  const newTeams = {
-    team1: { ...teams.team1 },
-    team2: { ...teams.team2 },
-  };
+  // Update player history
+  const newPlayers = players.map(p =>
+    p.name === activeTurn.name
+      ? { ...p, history: [...(p.history || []), pendingScore] }
+      : { ...p }
+  );
+
+  // Update team score / misses
+  const newTeams = { team1: { ...teams.team1 }, team2: { ...teams.team2 } };
   const currentTeamId = activeTurn.player.team;
   const team     = newTeams[currentTeamId];
   const teamName = currentTeamId === 'team1' ? 'Équipe 1' : 'Équipe 2';
 
   if (pendingScore === 0) {
     team.misses += 1;
-    if (team.misses >= 3) {
-      showToast(`${teamName} éliminée après 3 ratés !`);
-    }
+    if (team.misses >= 3) showToast(`${teamName} éliminée après 3 ratés !`);
   } else {
     team.misses  = 0;
     team.score  += pendingScore;
@@ -360,7 +462,6 @@ function validateScore() {
     }
   }
 
-  // Check for winner
   let winner = null;
   if (team.score === 50) {
     winner = { name: teamName, team: currentTeamId, reason: 'score' };
@@ -373,14 +474,21 @@ function validateScore() {
   // Advance to next player whose team is not eliminated
   let nextTurn = activeTurn.turn + 1;
   for (let i = 0; i < turnOrder.length; i++) {
-    const p = players.find(pl => pl.name === turnOrder[nextTurn % turnOrder.length]);
+    const p = newPlayers.find(pl => pl.name === turnOrder[nextTurn % turnOrder.length]);
     if (p && newTeams[p.team].misses < 3) break;
     nextTurn++;
   }
 
   socket.emit('update-game', {
     gameId,
-    state: { ...gameState, teams: newTeams, currentTurn: nextTurn, absoluteTurn: (absoluteTurn || 0) + 1, winner },
+    state: {
+      ...gameState,
+      players:      newPlayers,
+      teams:        newTeams,
+      currentTurn:  nextTurn,
+      absoluteTurn: (absoluteTurn || 0) + 1,
+      winner,
+    },
   });
 }
 
@@ -392,10 +500,6 @@ function toggleQR() {
 // HELPERS
 // =====================================================================
 
-/**
- * Returns the current active player (whose team is not eliminated).
- * { turn, name, player } or null if all teams eliminated.
- */
 function getActiveTurn(players, teams, turnOrder, currentTurn) {
   for (let i = 0; i < turnOrder.length * 2; i++) {
     const idx  = (currentTurn + i) % turnOrder.length;

@@ -17,9 +17,7 @@ function getLocalIP() {
   const nets = os.networkInterfaces();
   for (const name of Object.keys(nets)) {
     for (const net of nets[name]) {
-      if (net.family === 'IPv4' && !net.internal) {
-        return net.address;
-      }
+      if (net.family === 'IPv4' && !net.internal) return net.address;
     }
   }
   return 'localhost';
@@ -54,50 +52,65 @@ function buildTurnOrder(team1, team2) {
   return order;
 }
 
+async function makeQrCode(origin, gameId) {
+  const gameUrl = `${origin}/?id=${gameId}`;
+  let qrCode = '';
+  try {
+    qrCode = await QRCode.toDataURL(gameUrl, {
+      width: 200, margin: 2,
+      color: { dark: '#1B4332', light: '#FFFFFF' },
+    });
+  } catch (e) { console.error('QR error:', e.message); }
+  return { gameUrl, qrCode };
+}
+
+function newTeams() {
+  return { team1: { score: 0, misses: 0 }, team2: { score: 0, misses: 0 } };
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 io.on('connection', (socket) => {
+
+  // ---- Random team draw ----
   socket.on('create-game', async ({ players, baseUrl }) => {
     const gameId = Math.random().toString(36).substring(2, 10).toUpperCase();
-    // baseUrl is sent by the browser so it always reflects the actual public URL
     const origin = baseUrl || `http://${getLocalIP()}:${PORT}`;
-    const gameUrl = `${origin}/?id=${gameId}`;
+    const { gameUrl, qrCode } = await makeQrCode(origin, gameId);
 
-    let qrCode = '';
-    try {
-      qrCode = await QRCode.toDataURL(gameUrl, {
-        width: 200,
-        margin: 2,
-        color: { dark: '#1B4332', light: '#FFFFFF' },
-      });
-    } catch (e) {
-      console.error('QR generation error:', e.message);
-    }
-
-    const playerObjects = players.map(name => ({ name, team: null }));
-
+    const playerObjects = players.map(name => ({ name, team: null, history: [] }));
     const { team1, team2 } = drawTeams(playerObjects);
     const allPlayers = [...team1, ...team2];
     const turnOrder  = buildTurnOrder(team1, team2);
-    // scores and misses are tracked per team, not per player
-    const teams = {
-      team1: { score: 0, misses: 0 },
-      team2: { score: 0, misses: 0 },
-    };
 
     const game = {
-      id: gameId,
-      phase: 'teams',
-      players: allPlayers,
-      teams,
-      turnOrder,
-      currentTurn: 0,
-      absoluteTurn: 0,
-      winner: null,
-      url: gameUrl,
-      qrCode,
+      id: gameId, phase: 'teams',
+      players: allPlayers, teams: newTeams(), turnOrder,
+      currentTurn: 0, absoluteTurn: 0,
+      winner: null, url: gameUrl, qrCode,
     };
+    games.set(gameId, game);
+    socket.join(gameId);
+    socket.emit('game-state', game);
+  });
 
+  // ---- Manual team assignment ----
+  socket.on('set-teams', async ({ team1Names, team2Names, baseUrl }) => {
+    const gameId = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const origin = baseUrl || `http://${getLocalIP()}:${PORT}`;
+    const { gameUrl, qrCode } = await makeQrCode(origin, gameId);
+
+    const team1 = team1Names.map(name => ({ name, team: 'team1', history: [] }));
+    const team2 = team2Names.map(name => ({ name, team: 'team2', history: [] }));
+    const allPlayers = [...team1, ...team2];
+    const turnOrder  = buildTurnOrder(team1, team2);
+
+    const game = {
+      id: gameId, phase: 'teams',
+      players: allPlayers, teams: newTeams(), turnOrder,
+      currentTurn: 0, absoluteTurn: 0,
+      winner: null, url: gameUrl, qrCode,
+    };
     games.set(gameId, game);
     socket.join(gameId);
     socket.emit('game-state', game);
@@ -124,27 +137,16 @@ io.on('connection', (socket) => {
     const game = games.get(gameId);
     if (!game) return;
 
-    const freshPlayers = game.players.map(p => ({ name: p.name, team: null }));
-
+    const freshPlayers = game.players.map(p => ({ name: p.name, team: null, history: [] }));
     const { team1, team2 } = drawTeams(freshPlayers);
     const allPlayers = [...team1, ...team2];
     const turnOrder  = buildTurnOrder(team1, team2);
-    const teams = {
-      team1: { score: 0, misses: 0 },
-      team2: { score: 0, misses: 0 },
-    };
 
     const newGame = {
-      ...game,
-      phase: 'teams',
-      players: allPlayers,
-      teams,
-      turnOrder,
-      currentTurn: 0,
-      absoluteTurn: 0,
-      winner: null,
+      ...game, phase: 'teams',
+      players: allPlayers, teams: newTeams(), turnOrder,
+      currentTurn: 0, absoluteTurn: 0, winner: null,
     };
-
     games.set(gameId, newGame);
     io.to(gameId).emit('game-state', newGame);
   });
